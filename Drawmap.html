@@ -1528,7 +1528,7 @@
   // ====== "Cellule précise" (parser souple) ======
   cellSelectBtn.addEventListener('click', ()=>{
     const def = selected ? `${selected.x},${selected.y}` : '0,0';
-    const raw = prompt('Aller à la cellule (x,y) — séparateur "," ou "."', def);
+    const raw = prompt('Aller à la cellule (x,y)\nEn jeu entrer la commande .cp posi et vous pouvez collez directement ici.', def);
     if(raw==null) return;
     const parts = raw.replace(/\s+/g,'').split(/[.,]+/).filter(Boolean);
     if(parts.length<2){ showToast('Entrée invalide'); return; }
@@ -1796,6 +1796,7 @@
 </script>
 </body>
 </html>
+
 
 
 
