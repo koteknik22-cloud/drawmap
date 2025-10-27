@@ -1,0 +1,1799 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<link rel="icon" href='data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" font-size="90">🌍</text></svg>'>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Carte interactive — v8.3.2 (hover fixe + clic émoji + ctrl multi)</title>
+<style>
+  :root { --bg:#0b0e12; --panel:#11141a; --ink:#e7edf7; --muted:#9fb0c3; --accent:#5eead4; --sidebarW:360px; }
+  html, body { margin:0; height:100%; background:var(--bg); color:var(--ink);
+    font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, Helvetica Neue, Arial, "Apple Color Emoji", "Segoe UI Emoji"; }
+  #app { position:fixed; inset:0; display:grid; grid-template-columns: var(--sidebarW) 1fr; }
+
+  /* --- Sidebar plus compact --- */
+  #sidebar {
+    position:relative; top:0; height:100vh; overflow:auto; background:var(--panel); border-right:1px solid #1f2530;
+    padding:10px; display:grid; grid-template-rows:auto auto auto 1fr auto; gap:6px;
+  }
+  .muted { color:var(--muted); font-size:12px; }
+  .small { font-size:11px; }
+  .row { display:flex; gap:6px; align-items:center; flex-wrap:wrap; }
+  .btn { background:#1a2230; color:var(--ink); border:1px solid #2a3242; padding:6px 8px; border-radius:10px; cursor:pointer; font-weight:600; }
+  .btn:hover { border-color:#3b465a; }
+  .btn-danger { background:#411419; color:#ffe6e6; border-color:#7a1f28; }
+  .btn-danger:hover { border-color:#a32734; }
+  .btn-ghost { background:transparent; border:1px dashed #3a465a; }
+  label { font-size:12px; color:var(--muted); }
+  textarea, input[type="text"] { width:100%; background:#0f131b; color:var(--ink); border:1px solid #222b38; border-radius:8px; padding:6px; }
+  select { height:34px; border:none; background:#0f131b; color:var(--ink); border:1px solid #222b38; border-radius:8px; padding:0 8px; }
+  input[type="range"] { width:150px; }
+  main { position:relative; min-width:0; }
+  #canvas { display:block; width:100%; height:100%; background:#0a0d12; cursor:grab; touch-action:none; }
+  #canvas.dragging { cursor:grabbing; }
+  #hud { position:absolute; left: calc(var(--sidebarW) + 20px); top:10px; background:rgba(10,14,20,.8); border:1px solid #1d2430;
+    padding:6px 10px; border-radius:10px; pointer-events:none; font-size:12px; }
+  #toast { position:absolute; left:50%; transform:translateX(-50%); top:52px; background:rgba(20,24,32,.96); border:1px solid #2a3240;
+    padding:6px 10px; border-radius:10px; font-size:12px; opacity:0; transition:opacity .2s ease; max-width:70vw; line-height:1.35; white-space:normal; text-align:center; }
+  #toast.show { opacity:1; }
+  .hint { background:#0e1420; border:1px dashed #293245; padding:8px; border-radius:10px; }
+  .kbd { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size:11px; padding:2px 6px; border:1px solid #3a465c;
+    border-bottom-width:2px; border-radius:6px; }
+  .swatches { display:grid; grid-template-columns:repeat(6, 1fr); gap:6px; }
+  .swatch { height:26px; border-radius:8px; border:2px solid #2a3240; cursor:pointer; }
+  .swatch.active { outline:2px solid #9fd4ff; }
+  .zoneActions { display:flex; gap:6px; flex-wrap:wrap; }
+  #hoverTip {
+    position:absolute; display:none; max-width:320px; background:rgba(15,20,28,.95); color:#e7edf7; border:1px solid #2a3344;
+    padding:8px 10px; border-radius:10px; font-size:12px; line-height:1.35; pointer-events:none; box-shadow:0 6px 18px rgba(0,0,0,.35);
+    white-space:normal; z-index:70;
+  }
+  #hoverTip img { max-width: 260px; max-height: 180px; display:block; border-radius:8px; margin-bottom:6px; }
+
+  /* Panneau émoji */
+  #emojiPanel { display:none; margin-top:6px; background:#0f131b; border:1px solid #222b38; border-radius:10px; padding:8px; }
+  #emojiGrid { display:grid; grid-template-columns:repeat(5, 1fr); gap:6px; }
+  #emojiGrid .btn { padding:4px 0; font-size:18px; border-radius:8px; }
+  #emojiPanel .row { justify-content:flex-end; }
+
+  /* Menu contextuel */
+  #ctxMenu{
+    position:absolute; display:none; background:#0f131b; border:1px solid #2a3344; border-radius:10px; padding:8px; z-index:50; width:200px;
+    box-shadow:0 10px 26px rgba(0,0,0,.45);
+  }
+  #ctxMenu .btn{ width:100%; text-align:left; }
+
+  /* Entête sélection */
+  #selHeader{ display:flex; align-items:center; justify-content:space-between; }
+  #selCoord{ color:var(--muted); font-size:12px; }
+
+  /* Panneau dessin */
+  #drawPanel { display:none; background:#0f131b; border:1px solid #222b38; border-radius:10px; padding:8px; }
+  #toolRow .btn { padding:6px 8px; }
+  #toolRow .btn.active { outline:2px solid #9fd4ff; }
+
+  /* Vignettes capture */
+  #imgThumbWrap img { max-width: 100%; max-height: 130px; border-radius:10px; border:1px solid #2a3242; }
+
+  /* Popover Aide : absolu */
+  #helpBox { position:absolute; left:10px; right:10px; top:50px; z-index:40; display:none; }
+
+  /* Lightbox image */
+  #imgModal { position:fixed; inset:0; display:none; align-items:center; justify-content:center; background:rgba(0,0,0,.7); z-index:60; }
+  #imgModal .inner { max-width:min(90vw,1400px); max-height:min(90vh,90vh); padding:10px; background:#0d1117; border:1px solid #223; border-radius:12px; }
+  #imgModal img { max-width:100%; max-height:80vh; display:block; border-radius:10px; }
+  #imgModal .row { justify-content:flex-end; margin-top:8px; }
+</style>
+</head>
+<body>
+<div id="app">
+  <aside id="sidebar">
+    <div class="row">
+      <button id="helpToggle" class="btn">Aide</button>
+      <select id="sizeSelect" title="Dimensions de la carte (par axe)">
+        <option value="5000">5 000 × 5 000</option>
+        <option value="10000">10 000 × 10 000</option>
+        <option value="25000" selected>25 000 × 25 000</option>
+        <option value="50000">50 000 × 50 000</option>
+        <option value="100000">100 000 × 100 000</option>
+        <option value="1000000">1 000 000 × 1 000 000</option>
+        <option value="4000000">4 000 000 × 4 000 000</option>
+      </select>
+    </div>
+
+    <div class="hint small" id="helpBox">
+      <div style="font-weight:700;margin-bottom:6px">🗺️ Carte interactive <span id="titleSize">25 000 × 25 000</span></div>
+      <div><span class="kbd">🖱️</span> Glisser pour déplacer • <span class="kbd">Molette</span> Zoom/Dézoom</div>
+      <div><span class="kbd">Clique gauche</span> Éditer (couleur + texte + emoji) • <span class="kbd">Clic droit</span> menu</div>
+      <div><span class="kbd">Double-clic</span> Zoomer • <span class="kbd">F</span> Maximiser • <span class="kbd">Alt+Enter</span> Plein écran</div>
+      <div class="muted" style="margin-top:6px">
+        💡 <b>Mode dessin</b> : pinceau/rectangle/cercle/effacer.  
+        Maintiens <span class="kbd">Espace</span> pour déplacer la vue (ancrage sous la souris).
+      </div>
+      <div id="rangeInfo" class="muted" style="margin-top:6px"></div>
+    </div>
+
+    <!-- Palette -->
+    <div><div id="swatches" class="swatches"></div></div>
+
+    <!-- Navigation rapide -->
+    <div class="row">
+      <button id="fitBtn" class="btn">Maximiser</button>
+      <button id="resetViewBtn" class="btn">Centrer</button>
+      <button id="spawnBtn" class="btn">Spawn (0,0)</button>
+    </div>
+
+    <!-- Sélection / Zone / Liens -->
+    <div>
+      <div id="selHeader"><label>Sélection</label><span id="selCoord">(—)</span></div>
+      <div class="row" style="margin-top:4px;">
+        <button id="cellSelectBtn" class="btn">Cellule précise</button>
+        <button id="zoneBtn" class="btn">Zone</button>
+      </div>
+
+      <div id="linksRow" class="row" style="display:none; margin-top:4px;">
+        <button id="linkBtn" class="btn">Relier (trait)</button>
+        <button id="unlinkBtn" class="btn">Retirer trait</button>
+      </div>
+
+      <div id="zoneWarning" class="muted small" style="display:none; margin:6px 0 6px 2px">
+        ⚠️ Évitez les zones immenses (risque de lenteur). Le texte n’écrase pas les cases avec émoji.
+      </div>
+      <div class="zoneActions" id="zoneActions" style="display:none">
+        <button id="zoneApply" class="btn">Appliquer à la zone</button>
+        <button id="zoneReset" class="btn">Réinitialiser la zone</button>
+        <button id="zoneCancel" class="btn">Annuler la zone</button>
+      </div>
+      <div id="zoneInfo" class="muted small" style="margin-top:4px"></div>
+      <div id="zoneProgress" class="muted small" style="display:none; margin-top:4px"></div>
+    </div>
+
+    <!-- Mode dessin -->
+    <div>
+      <div class="row">
+        <button id="drawToggle" class="btn">Mode dessin</button>
+      </div>
+      <div id="drawPanel" class="small" style="margin-top:6px">
+        <div id="toolRow" class="row">
+          <button class="btn active" data-tool="brush" id="toolBrush">🖌️ Pinceau</button>
+          <button class="btn" data-tool="rect" id="toolRect">▭ Rectangle</button>
+          <button class="btn" data-tool="circle" id="toolCircle">◯ Cercle</button>
+          <button class="btn" data-tool="erase" id="toolErase">🧹 Effacer (sélection)</button>
+          <button id="pickColorBtn" class="btn" title="Échantillonner une couleur du dessin">Pipette (dessin)</button>
+        </div>
+        <div class="row" style="margin-top:4px">
+          <label>Taille</label>
+          <input type="range" id="brushSize" min="1" max="400" step="1" value="30" />
+          <span id="brushSizeOut" class="muted">30</span>
+        </div>
+        <div class="row" style="margin-top:4px">
+          <label>Opacité</label>
+          <input type="range" id="brushAlpha" min="0.05" max="1" step="0.05" value="0.6" />
+          <span id="brushAlphaOut" class="muted">0.60</span>
+        </div>
+        <div class="row" style="margin-top:6px">
+          <button id="clearDrawAll" class="btn btn-danger">Tout effacer (dessin)</button>
+        </div>
+        <div class="row" style="margin-top:4px">
+          <button id="exportDrawBtn" class="btn">Exporter Dessin</button>
+          <button id="importDrawBtn" class="btn">Importer Dessin</button>
+          <input id="fileDrawInput" type="file" accept="application/json" style="display:none" />
+        </div>
+        <div class="muted small" style="margin-top:4px">
+          Le dessin est un calque séparé (vectoriel), sauvegardé par taille de carte.  
+          Maintiens <span class="kbd">Espace</span> et déplace la souris : la vue reste ancrée sous le pointeur.
+        </div>
+      </div>
+    </div>
+
+    <!-- Émoji -->
+    <div>
+      <label>Épingle <span class="muted small">(visible à tout niveau de zoom)</span></label>
+      <div class="row" style="margin-top:4px;">
+        <button id="emojiToggle" class="btn">Choisir</button>
+        <button id="emojiRemoveBtn" class="btn">Retirer</button>
+      </div>
+      <div id="emojiPanel">
+        <div id="emojiGrid"></div>
+        <div class="row" style="margin-top:6px">
+          <button id="emojiClear" class="btn">Retirer émoji</button>
+          <button id="emojiClose" class="btn">Fermer</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Texte + Capture -->
+    <div>
+      <label>Information :</label>
+      <textarea id="cellNote" rows="7" placeholder="aucune information enregistrée"></textarea>
+    </div>
+
+    <div>
+      <label>Capture d’écran :</label>
+      <div class="row" style="margin-top:4px;">
+        <button id="imgAddBtn" class="btn">Ajouter…</button>
+        <button id="imgZoomBtn" class="btn">Agrandir</button>
+        <button id="imgClearBtn" class="btn">Retirer</button>
+        <input id="imgInput" type="file" accept="image/*" style="display:none" />
+      </div>
+      <div id="imgThumbWrap" class="row" style="margin-top:4px"></div>
+      <div class="muted small">Stockée localement (compressée). Évite les fichiers énormes.</div>
+    </div>
+
+    <div class="row">
+      <button id="resetBtn" class="btn">Réinitialiser cellule</button>
+    </div>
+
+    <!-- Import/Export cellules -->
+    <div>
+      <div class="row">
+        <button id="exportBtn" class="btn">Exporter JSON</button>
+        <button id="importBtn" class="btn">Importer JSON</button>
+        <button id="importMergeBtn" class="btn">Importer (fusion)</button>
+        <button id="saveBtn" class="btn">Sauver</button>
+        <input id="fileInput" type="file" accept="application/json" style="display:none" />
+        <input id="fileInputMerge" type="file" accept="application/json" style="display:none" />
+      </div>
+    </div>
+
+    <div class="muted small">Tout est stocké <b>localement</b> (cellules + dessin + captures), par <b>taille de carte</b>. Pense à exporter pour sauvegarder.  
+    Raccourci <span class="kbd">Ctrl+S</span> : Sauver (carte + dessin).</div>
+  </aside>
+
+  <main id="stage">
+    <canvas id="canvas"></canvas>
+    <div id="hud">Zoom: <span id="zoomOut">1.00×</span> • Curseur: (<span id="cx">0</span>, <span id="cy">0</span>)</div>
+    <div id="toast"></div>
+    <div id="hoverTip"></div>
+
+    <!-- Menu contextuel -->
+    <div id="ctxMenu">
+      <div class="row" style="flex-direction:column; gap:6px; align-items:stretch">
+        <button id="ctxResetBtn" class="btn">Réinitialiser la cellule</button>
+        <button id="ctxEmojiBtn" class="btn">Choisir un émoji…</button>
+      </div>
+    </div>
+
+    <!-- Lightbox -->
+    <div id="imgModal">
+      <div class="inner">
+        <img id="imgModalImg" alt="Aperçu">
+        <div class="row">
+          <button id="imgModalClose" class="btn">Fermer</button>
+        </div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<script>
+(() => {
+  // ====== Base : tailles, rendu, etc. ======
+  const MIN_SCALE = 1e-5; // pour 4M
+  const sizeSelect = document.getElementById('sizeSelect');
+  const titleSize  = document.getElementById('titleSize');
+  const rangeInfo  = document.getElementById('rangeInfo');
+
+  // --- Session persistante
+  const SESSION_KEY = 'biggrid.v8.3.session';
+  function saveSession(partial){
+    try{
+      const prev = JSON.parse(localStorage.getItem(SESSION_KEY) || '{}');
+      const next = { ...prev, ...partial };
+      localStorage.setItem(SESSION_KEY, JSON.stringify(next));
+    }catch{}
+  }
+  function loadSession(){ try{ return JSON.parse(localStorage.getItem(SESSION_KEY) || '{}'); }catch{ return {}; } }
+
+  // Dernière taille
+  const sess = loadSession();
+  if (sess.lastSize && [...sizeSelect.options].some(o=>o.value===String(sess.lastSize))) {
+    sizeSelect.value = String(sess.lastSize);
+  }
+
+  let CELLS_PER_AXIS = parseInt(sizeSelect.value, 10);
+  let MIN_COORD, MAX_COORD, WORLD_SIZE;
+
+  function recomputeBounds() {
+    MIN_COORD = -Math.floor(CELLS_PER_AXIS/2);
+    MAX_COORD =  Math.ceil(CELLS_PER_AXIS/2)-1;
+    WORLD_SIZE = MAX_COORD - MIN_COORD + 1;
+    titleSize.textContent = `${WORLD_SIZE.toLocaleString()} × ${WORLD_SIZE.toLocaleString()}`;
+    rangeInfo.textContent = `Centre (0,0). Plage: ${MIN_COORD} ↔ ${MAX_COORD} sur X et Y (${WORLD_SIZE.toLocaleString()}×${WORLD_SIZE.toLocaleString()}).`;
+    document.title = `Carte interactive — v8.3.2 (${WORLD_SIZE.toLocaleString()}×${WORLD_SIZE.toLocaleString()})`;
+  }
+  recomputeBounds();
+
+  // ====== DOM ======
+  const app = document.getElementById('app');
+  const stage = document.getElementById('stage');
+  const canvas = document.getElementById('canvas');
+  const ctx = canvas.getContext('2d', { alpha:false });
+  const hudZoom = document.getElementById('zoomOut');
+  const hudCX = document.getElementById('cx');
+  const hudCY = document.getElementById('cy');
+  const toast = document.getElementById('toast');
+  const hoverTip = document.getElementById('hoverTip');
+
+  const helpToggle = document.getElementById('helpToggle');
+  const helpBox = document.getElementById('helpBox');
+
+  const swWrap = document.getElementById('swatches');
+  const cellSelectBtn = document.getElementById('cellSelectBtn');
+  const zoneBtn = document.getElementById('zoneBtn');
+  const zoneWarning = document.getElementById('zoneWarning');
+  const zoneActions = document.getElementById('zoneActions');
+  const zoneApplyBtn = document.getElementById('zoneApply');
+  const zoneResetBtn = document.getElementById('zoneReset');
+  const zoneCancelBtn = document.getElementById('zoneCancel');
+  const zoneInfo = document.getElementById('zoneInfo');
+  const zoneProgress = document.getElementById('zoneProgress');
+
+  const fitBtn = document.getElementById('fitBtn');
+  const resetViewBtn = document.getElementById('resetViewBtn');
+  const spawnBtn = document.getElementById('spawnBtn');
+
+  const linkBtn = document.getElementById('linkBtn');
+  const unlinkBtn = document.getElementById('unlinkBtn');
+  const linksRow = document.getElementById('linksRow');
+
+  const noteInput = document.getElementById('cellNote');
+  const resetBtn = document.getElementById('resetBtn');
+
+  const exportBtn = document.getElementById('exportBtn');
+  const importBtn = document.getElementById('importBtn');
+  const importMergeBtn = document.getElementById('importMergeBtn');
+  const saveBtn = document.getElementById('saveBtn');
+  const fileInput = document.getElementById('fileInput');
+  const fileInputMerge = document.getElementById('fileInputMerge');
+
+  const selCoord = document.getElementById('selCoord');
+
+  // Emoji UI
+  const emojiToggle = document.getElementById('emojiToggle');
+  const emojiRemoveBtn = document.getElementById('emojiRemoveBtn');
+  const emojiPanel = document.getElementById('emojiPanel');
+  const emojiGrid  = document.getElementById('emojiGrid');
+  const emojiClear = document.getElementById('emojiClear');
+  const emojiClose = document.getElementById('emojiClose');
+  const ctxMenu    = document.getElementById('ctxMenu');
+  const ctxResetBtn= document.getElementById('ctxResetBtn');
+  const ctxEmojiBtn= document.getElementById('ctxEmojiBtn');
+
+  // Capture + Lightbox
+  const imgAddBtn = document.getElementById('imgAddBtn');
+  const imgZoomBtn = document.getElementById('imgZoomBtn');
+  const imgClearBtn = document.getElementById('imgClearBtn');
+  const imgInput = document.getElementById('imgInput');
+  const imgThumbWrap = document.getElementById('imgThumbWrap');
+  const imgModal = document.getElementById('imgModal');
+  const imgModalImg = document.getElementById('imgModalImg');
+  const imgModalClose = document.getElementById('imgModalClose');
+
+  // ====== Palette ======
+  const SWATCHES = ['#0a0d12','#ffffff','#94a3b8','#403A3A','#bae6fd','#007aff','#5eead4','#22c55e','#3FF527','#fff3b0','#ffd60a','#f97316','#c2410c','#ff3b30','#e11d48','#7c3aed','#8b5e3c'];
+  let currentColor = SWATCHES[6];
+  function setActiveSwatch(hex){
+    currentColor = hex;
+    swWrap.querySelectorAll('.swatch').forEach(el=>el.classList.remove('active'));
+    const match = [...swWrap.children].find(b => b.dataset.hex === hex.toLowerCase());
+    if(match) match.classList.add('active');
+  }
+  SWATCHES.forEach((hex,i)=>{
+    const b=document.createElement('button');
+    b.className='swatch'+(i===6?' active':'' );
+    b.dataset.hex = hex.toLowerCase();
+    b.style.background=hex; b.title=hex;
+    b.addEventListener('click',()=>{
+      setActiveSwatch(hex.toLowerCase());
+      if(zoneMode && rectSel){ applyZone('apply'); }
+      else { applyToSelection(c=>({ ...c, color: currentColor })); }
+    });
+    swWrap.appendChild(b);
+  });
+
+  // ====== État cellules & liens ======
+  function storageKeyCells(size){ return `biggrid.v8.3.cells.${size}`; }
+  function storageKeyPaint(size){ return `biggrid.v8.3.paint.${size}`; }
+  let STORAGE_KEY = storageKeyCells(CELLS_PER_AXIS);
+  let PAINT_KEY   = storageKeyPaint(CELLS_PER_AXIS);
+
+  const globalEmojiScale = 0.060;
+  let cells = new Map(); // "x,y" -> { color, t, e, es, img? }
+  let links = []; // [{from:"x,y", to:"x,y"}]
+
+  // Vue & sélection
+  let dpr = Math.max(1, window.devicePixelRatio || 1);
+  const view = { x:0, y:0, scale:24 };
+  let selected = {x:0,y:0};
+  const selectedSet = new Set();
+  let rectSel = null;
+  let zoneMode = false;
+
+  // CTRL-clic intelligent
+  let ctrlPrimed = false;
+
+  // --- gestion des fichiers importés (pour "Sauver")
+  let lastCellsFileName = sess.lastCellsFileName || '';
+  let lastPaintFileName = sess.lastPaintFileName || '';
+  
+  let cellsFileHandle = null;
+  let paintFileHandle = null;
+  
+  function buildCellsJSONString(){
+    const obj = Object.fromEntries(cells);
+    obj.__links = links;
+    return JSON.stringify(obj, null, 2);
+  }
+  function buildPaintJSONString(){
+    return JSON.stringify(paintStrokes, null, 2);
+  }
+  
+  async function writeHandle(handle, text){
+    const writable = await handle.createWritable();
+    await writable.write(new Blob([text], { type: 'application/json' }));
+    await writable.close();
+  }
+
+  async function ensureFileHandles(){
+    if (!window.showSaveFilePicker) return false; // navigateur non supporté
+  
+    const optsJson = {
+      types: [{ description: 'JSON', accept: { 'application/json': ['.json'] } }],
+      excludeAcceptAllOption: true
+    };
+  
+    if (!cellsFileHandle){
+      cellsFileHandle = await window.showSaveFilePicker({
+        suggestedName: lastCellsFileName || `carte-${WORLD_SIZE}x${WORLD_SIZE}.json`,
+        ...optsJson
+      });
+      // on mémorise juste le nom de fichier pour l'UI
+      lastCellsFileName = (await cellsFileHandle.getFile()).name;
+      saveSession({ lastCellsFileName });
+    }
+    if (!paintFileHandle){
+      paintFileHandle = await window.showSaveFilePicker({
+        suggestedName: lastPaintFileName || `dessin-${WORLD_SIZE}x${WORLD_SIZE}.json`,
+        ...optsJson
+      });
+      lastPaintFileName = (await paintFileHandle.getFile()).name;
+      saveSession({ lastPaintFileName });
+    }
+    return true;
+  }
+
+
+  // ====== Historique (Undo / Redo) ======
+  const undoStack = [];
+  const redoStack = [];
+  function pushHistory(entry){ if(!entry) return; undoStack.push(entry); redoStack.length=0; }
+  function applyEntry(entry, dir){
+    const list = (entry.type==='batch') ? entry.changes : [entry];
+    const iter = (dir===-1 ? [...list].reverse() : list);
+    for(const ch of iter){
+      if(ch.kind === 'cell'){
+        if(dir===-1){ if(ch.before) cells.set(ch.k, ch.before); else cells.delete(ch.k); }
+        else{         if(ch.after)  cells.set(ch.k, ch.after);  else cells.delete(ch.k); }
+      } else if(ch.type === 'linksAdd') {
+        if(dir===-1){ links = links.filter(l => !ch.items.some(it=> it.from===l.from && it.to===l.to)); }
+        else         { links = links.concat(ch.items); }
+      } else if(ch.type === 'linksRemove') {
+        if(dir===-1){ links = links.concat(ch.items); }
+        else         { links = links.filter(l => !ch.items.some(it=> it.from===l.from && it.to===l.to)); }
+      } else if(ch.type === 'paintAdd') {
+        if(dir===-1){ paintStrokes = paintStrokes.filter(s => !ch.items.some(it => it.id === s.id)); }
+        else { paintStrokes = paintStrokes.concat(ch.items); }
+        savePaint();
+      } else if(ch.type === 'paintRemove') {
+        if(dir===-1){ paintStrokes = paintStrokes.concat(ch.items); }
+        else { const ids = new Set(ch.items.map(it=>it.id)); paintStrokes = paintStrokes.filter(s => !ids.has(s.id)); }
+        savePaint();
+      }
+    }
+    save(); requestRender();
+  }
+  function undo(){ const e = undoStack.pop(); if(!e) return; redoStack.push(e); applyEntry(e, -1); }
+  function redo(){ const e = redoStack.pop(); if(!e) return; undoStack.push(e); applyEntry(e, +1); }
+  function withHistoryBatch(fn){
+    const changes = []; const record = (chg) => { if(chg) changes.push({ kind:'cell', ...chg }); };
+    fn(record); if(changes.length) pushHistory({ type:'batch', changes });
+  }
+
+  // ====== Utils ======
+  const key = (x,y) => `${x},${y}`;
+  const parseKey = k => { const [x,y] = k.split(',').map(Number); return {x,y}; };
+  const clamp = (v,a,b) => Math.max(a, Math.min(b, v));
+  const worldToScreen = (wx,wy) => ({ x:(wx - view.x) * view.scale, y:(wy - view.y) * view.scale });
+  const screenToWorld = (sx,sy) => ({ x:view.x + sx / view.scale, y:view.y + sy / view.scale });
+
+  function showToast(msg){
+    toast.textContent = msg; toast.classList.add('show');
+    clearTimeout(showToast._t); showToast._t = setTimeout(()=> toast.classList.remove('show'), 1800);
+  }
+
+  function esc(s){ return (s||'').replace(/[&<>]/g, c=>({ '&':'&amp;','<':'&lt;','>':'&gt;' }[c])); }
+
+  // ====== Aide pour calcul taille/position émoji (utilisé pour hover et hit-test) ======
+  function emojiScreenInfo(x, y, v){
+    const cellSize = view.scale;
+    const p = worldToScreen(x, y);
+    const centerX = p.x + cellSize/2;
+    const centerY = p.y + cellSize/2 + Math.max(1, cellSize*0.02);
+
+    let pxSize;
+    if (cellSize >= 2){
+      const base = cellSize * 0.7 * (v.es || 1);
+      pxSize = Math.max(18, Math.min(140, Math.floor(base * globalEmojiScale)));
+    } else {
+      pxSize = Math.max(18, Math.min(160, Math.floor(520/(cellSize+1) * globalEmojiScale)));
+    }
+    const half = pxSize * 0.55; // boite de hit-test un peu plus large que le glyphe
+    return {
+      cx:centerX, cy:centerY, size:pxSize,
+      x1:centerX - half, y1:centerY - half,
+      x2:centerX + half, y2:centerY + half
+    };
+  }
+  // ====== Sélection & helpers de picking (cellule / émoji) ======
+  function getVisibleBounds(){
+    const w = canvas.clientWidth, h = canvas.clientHeight;
+    return {
+      minX: Math.max(MIN_COORD, Math.floor(view.x)),
+      minY: Math.max(MIN_COORD, Math.floor(view.y)),
+      maxX: Math.min(MAX_COORD, Math.ceil(view.x + w / view.scale)),
+      maxY: Math.min(MAX_COORD, Math.ceil(view.y + h / view.scale)),
+    };
+  }
+
+  function pickCellFromPointer(px, py){
+    const rect = canvas.getBoundingClientRect();
+    const mx = px - rect.left, my = py - rect.top;
+    const w = screenToWorld(mx, my);
+    const cx = clamp(Math.floor(w.x + 1e-5), MIN_COORD, MAX_COORD);
+    const cy = clamp(Math.floor(w.y + 1e-5), MIN_COORD, MAX_COORD);
+    return { cx, cy, mx, my };
+  }
+
+  // Cherche un émoji "cliquable" autour du pointeur, même zoom très faible
+  function pickEmojiCellNearPointer(px, py){
+    const rect = canvas.getBoundingClientRect();
+    const mx = px - rect.left, my = py - rect.top;
+    const vis = getVisibleBounds();
+    const margin = 22; // px autour du glyphe pour rendre le clic facile
+    let best = null, bestDist = Infinity;
+
+    for (const [k,v] of cells){
+      if (!v?.e) continue;
+      const {x,y} = parseKey(k);
+      if (x<vis.minX||x>vis.maxX||y<vis.minY||y>vis.maxY) continue;
+      const box = emojiScreenInfo(x,y,v);
+      // Si le pointeur est dans la boite agrandie
+      if (mx >= box.x1 - margin && mx <= box.x2 + margin && my >= box.y1 - margin && my <= box.y2 + margin){
+        const d = Math.hypot(mx - box.cx, my - box.cy);
+        if (d < bestDist){ bestDist = d; best = {x,y,k}; }
+      }
+    }
+    return best;
+  }
+
+  function setSingleSelection(x,y){
+    selected = {x,y};
+    selectedSet.clear();
+    selectedSet.add(key(x,y));
+    ctrlPrimed = false; // sortir du cycle de Ctrl-sélection
+    saveSession({ lastSel: selected });
+    updateEditorsFromCell(x,y);
+    updateSelCoord();
+    requestRender();
+  }
+  function toggleSelection(x,y){
+    const k = key(x,y);
+    if (selectedSet.has(k)) selectedSet.delete(k); else selectedSet.add(k);
+    selected = {x,y};
+    saveSession({ lastSel: selected });
+    updateEditorsFromCell(x,y);
+    updateSelCoord();
+    requestRender();
+  }
+  // ====== Chargement & sauvegarde cellules/liaisons ======
+  function load(){
+    try{
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if(raw){
+        const obj = JSON.parse(raw);
+        if (obj.__links) { links = obj.__links; delete obj.__links; }
+        cells = new Map(Object.entries(obj));
+      } else { cells = new Map(); links = []; }
+    }catch(e){ console.warn('Load failed', e); }
+  }
+  function save(){
+    try{
+      const obj = Object.fromEntries(cells);
+      obj.__links = links;
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(obj));
+    }catch(e){}
+  }
+
+  // ====== Données cellules ======
+  function getCell(x,y){ return cells.get(key(x,y)); }
+  function setCell(x,y,opts){
+    if (x<MIN_COORD||x>MAX_COORD||y<MIN_COORD||y>MAX_COORD) return null;
+    const k = key(x,y); const prev = cells.get(k) || null;
+    const next = {
+      color: opts.color ?? prev?.color ?? currentColor,
+      t: (opts.t ?? prev?.t ?? ''),
+      e: (opts.e ?? prev?.e ?? ''),
+      es: Number(opts.es ?? prev?.es ?? 1),
+      img: (opts.img !== undefined ? opts.img : prev?.img)
+    };
+    cells.set(k, next); return {k, before:prev, after:next};
+  }
+  function resetCell(x,y){ const k = key(x,y); const prev = cells.get(k) || null; cells.delete(k); return {k, before:prev, after:null}; }
+
+  function updateEditorsFromCell(x,y){
+    const v = (x!=null&&y!=null)? getCell(x,y) : null;
+    if(v){ noteInput.value = v.t || ''; noteInput.placeholder = v.t? '' : 'aucune information enregistrée'; }
+    else { noteInput.value=''; noteInput.placeholder='aucune information enregistrée'; }
+    updateThumb(v?.img);
+  }
+  function updateSelCoord(){ selCoord.textContent = selected ? `(${selected.x}, ${selected.y})` : '(—)'; }
+  // ====== Info-bulle (hoverTip) — corrigée pour le zoom min et les émojis ======
+  let lastHoverKey = null;
+
+  function buildHoverHTML(v, x, y){
+    const parts = [];
+    parts.push(`<div style="opacity:.8">${x}, ${y}</div>`);
+    if(v?.e){ parts.push(`<div style="font-size:20px;margin:2px 0">${v.e}</div>`); }
+    if(v?.t){ parts.push(`<div style="opacity:.95">${esc(v.t)}</div>`); }
+    if(v?.img){ parts.push(`<img src="${v.img}" alt="capture">`); }
+    return parts.join('');
+  }
+
+  function positionHoverTip(px, py){
+    const margin = 12;
+    let x = px + margin, y = py + margin;
+    const rect = stage.getBoundingClientRect();
+    const tipRect = hoverTip.getBoundingClientRect();
+    if(x + tipRect.width > rect.width - 6) x = px - tipRect.width - margin;
+    if(y + tipRect.height > rect.height - 6) y = py - tipRect.height - margin;
+    hoverTip.style.left = `${x}px`;
+    hoverTip.style.top  = `${y}px`;
+  }
+
+  function showHoverForCell(cx, cy, clientX, clientY){
+    const v = getCell(cx, cy);
+    if(!v || (!v.t && !v.e && !v.img)){
+      hoverTip.style.display='none'; lastHoverKey=null; return;
+    }
+    const k = key(cx,cy);
+    if(k !== lastHoverKey){
+      hoverTip.innerHTML = buildHoverHTML(v, cx, cy);
+      lastHoverKey = k;
+    }
+    hoverTip.style.display='block';
+    const stageRect = stage.getBoundingClientRect();
+    positionHoverTip(clientX - stageRect.left, clientY - stageRect.top);
+  }
+
+  // Utilise le hit-test émoji quand on est très dézoomé
+  function handleHover(clientX, clientY){
+    const rect = canvas.getBoundingClientRect();
+    const mx = clientX - rect.left, my = clientY - rect.top;
+    if(mx<0||my<0||mx>rect.width||my>rect.height){ hoverTip.style.display='none'; lastHoverKey=null; return; }
+
+    const cellSize = view.scale;
+    if (cellSize < 10){
+      const emo = pickEmojiCellNearPointer(clientX, clientY);
+      if (emo){ showHoverForCell(emo.x, emo.y, clientX, clientY); return; }
+    }
+    const pick = pickCellFromPointer(clientX, clientY);
+    showHoverForCell(pick.cx, pick.cy, clientX, clientY);
+  }
+  // ====== Rendu (idem v8.3.1, inchangé visuellement) ======
+  let raf=null, dirty=true; function requestRender(){ dirty=true; if(!raf) raf=requestAnimationFrame(draw); }
+  function draw(){
+    raf=null; if(!dirty) return; dirty=false;
+    const w = canvas.clientWidth, h = canvas.clientHeight;
+    ctx.clearRect(0,0,w,h); hudZoom.textContent = view.scale.toFixed(2)+'×';
+
+    const vis = getVisibleBounds();
+    const cellSize = view.scale;
+
+    drawQuadrantBackground();
+    drawPaint(vis); // calque dessin en-dessous
+    if(cellSize >= 2){ drawVisibleCells(vis, cellSize); if(cellSize >= 14) drawGridLines(vis); }
+    else { drawModifiedCellsHeat(vis); drawEmojiAtTinyZoom(vis, cellSize); }
+    drawLinks();
+    drawAxesAndBorder(); drawSelection(); drawRectSelection();
+
+    linksRow.style.display = selectedSet.size>=2 ? '' : 'none';
+  }
+
+  function drawQuadrantBackground(){
+    const rect = canvas.getBoundingClientRect();
+    const s00 = worldToScreen(0,0);
+    ctx.save();
+    ctx.globalAlpha = 0.06;
+
+    const leftW  = Math.max(0, Math.min(rect.width,  s00.x));
+    const rightW = Math.max(0, rect.width - Math.max(0, s00.x));
+    const topH   = Math.max(0, Math.min(rect.height, s00.y));
+    const botH   = Math.max(0, rect.height - Math.max(0, s00.y));
+
+    ctx.fillStyle = '#324155'; ctx.fillRect(0, 0, leftW, topH);
+    ctx.fillStyle = '#2b394c'; ctx.fillRect(leftW, 0, rightW, topH);
+    ctx.fillStyle = '#2a3546'; ctx.fillRect(0, topH, leftW, botH);
+    ctx.fillStyle = '#253142'; ctx.fillRect(leftW, topH, rightW, botH);
+    ctx.restore();
+  }
+
+  function drawGridLines(vis){
+    ctx.save();
+    ctx.strokeStyle = 'rgba(120,140,170,0.22)'; ctx.lineWidth = 1;
+
+    for (let x = vis.minX; x <= vis.maxX; x++) {
+      const sx = worldToScreen(x, vis.minY).x;
+      ctx.beginPath(); ctx.moveTo(sx + 0.5, 0); ctx.lineTo(sx + 0.5, canvas.clientHeight); ctx.stroke();
+    }
+    for (let y = vis.minY; y <= vis.maxY; y++) {
+      const sy = worldToScreen(vis.minX, y).y;
+      ctx.beginPath(); ctx.moveTo(0, sy + 0.5); ctx.lineTo(canvas.clientWidth, sy + 0.5); ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  function drawVisibleCells(vis, cellSize){
+    ctx.save(); ctx.textAlign='center'; ctx.textBaseline='middle';
+    for(const [k,v] of cells){
+      const {x,y}=parseKey(k);
+      if(x<vis.minX||x>vis.maxX||y<vis.minY||y>vis.maxY) continue;
+      const p=worldToScreen(x,y);
+      const color = (v.color || '#5eead4').toLowerCase();
+      const r=parseInt(color.slice(1,3),16), g=parseInt(color.slice(3,5),16), b=parseInt(color.slice(5,7),16);
+      ctx.fillStyle = `rgb(${r},${g},${b})`;
+      ctx.globalAlpha = (color==='#0a0d12') ? 1 : 0.92;
+      ctx.fillRect(Math.floor(p.x)+1, Math.floor(p.y)+1, Math.ceil(cellSize)-1, Math.ceil(cellSize)-1);
+      ctx.globalAlpha=1;
+
+      if(v.e){
+        const info = emojiScreenInfo(x,y,v);
+        ctx.font = `${info.size}px system-ui, "Apple Color Emoji", "Segoe UI Emoji"`;
+        ctx.fillStyle = '#fff';
+        ctx.fillText(v.e, info.cx, info.cy);
+      }
+    }
+    ctx.restore();
+  }
+  function drawModifiedCellsHeat(vis){
+    ctx.save(); const s=Math.max(1, Math.floor(view.scale));
+    for(const [k,v] of cells){
+      const {x,y}=parseKey(k);
+      if(x<vis.minX||x>vis.maxX||y<vis.minY||y>vis.maxY) continue;
+      const p=worldToScreen(x,y);
+      ctx.fillStyle = v.color || '#5eead4';
+      ctx.globalAlpha=0.9;
+      ctx.fillRect(Math.floor(p.x), Math.floor(p.y), s, s);
+    }
+    ctx.globalAlpha=1; ctx.restore();
+  }
+  function drawEmojiAtTinyZoom(vis, cellSize){
+    ctx.save(); ctx.textAlign='center'; ctx.textBaseline='middle';
+    for(const [k,v] of cells){
+      if(!v.e) continue; const {x,y}=parseKey(k);
+      if(x<vis.minX||x>vis.maxX||y<vis.minY||y>vis.maxY) continue;
+      const info = emojiScreenInfo(x,y,v);
+      ctx.font = `${info.size}px system-ui, "Apple Color Emoji", "Segoe UI Emoji"`;
+      ctx.fillStyle='#fff'; ctx.fillText(v.e, info.cx, info.cy);
+    }
+    ctx.restore();
+  }
+  function drawAxesAndBorder(){
+    ctx.save(); ctx.lineWidth=2; ctx.strokeStyle='rgba(94,234,212,0.9)';
+    const ax=worldToScreen(0.5, view.y).x; ctx.beginPath(); ctx.moveTo(Math.round(ax)+0.5,0); ctx.lineTo(Math.round(ax)+0.5,canvas.clientHeight); ctx.stroke();
+    const ay=worldToScreen(view.x,0.5).y; ctx.beginPath(); ctx.moveTo(0,Math.round(ay)+0.5); ctx.lineTo(canvas.clientWidth, Math.round(ay)+0.5); ctx.stroke();
+    ctx.strokeStyle='rgba(160,180,210,0.6)'; ctx.lineWidth=1.5;
+    const tl=worldToScreen(MIN_COORD, MIN_COORD); const br=worldToScreen(MAX_COORD+1, MAX_COORD+1);
+    ctx.strokeRect(Math.floor(tl.x)+0.5, Math.floor(tl.y)+0.5, Math.ceil(br.x-tl.x), Math.ceil(br.y-tl.y));
+    const o=worldToScreen(0.5,0.5); ctx.fillStyle='rgba(236,244,255,0.95)'; ctx.font='12px ui-sans-serif'; ctx.fillText('(0,0)', o.x+6, o.y-6);
+    ctx.restore();
+  }
+  function drawSelection(){
+    if(selectedSet.size===0) return;
+    ctx.save(); ctx.strokeStyle='rgba(245,158,11,0.95)'; ctx.setLineDash([6,4]); ctx.lineWidth=2;
+    for (const k of selectedSet){
+      const {x,y}=parseKey(k); const p=worldToScreen(x,y);
+      const cs=view.scale;
+      ctx.strokeRect(Math.floor(p.x)+1, Math.floor(p.y)+1, Math.ceil(cs)-1, Math.ceil(cs)-1);
+    }
+    ctx.restore();
+  }
+  function drawRectSelection(){
+    if(!rectSel) return; const p1=worldToScreen(rectSel.x1, rectSel.y1); const p2=worldToScreen(rectSel.x2+1, rectSel.y2+1);
+    ctx.save(); ctx.strokeStyle='rgba(94,234,212,0.9)'; ctx.setLineDash([8,4]); ctx.lineWidth=2;
+    ctx.strokeRect(Math.floor(p1.x)+0.5, Math.floor(p1.y)+0.5, Math.ceil(p2.x-p1.x), Math.ceil(p2.y-p1.y));
+    ctx.fillStyle='rgba(94,234,212,0.12)'; ctx.fillRect(Math.floor(p1.x)+1, Math.floor(p1.y)+1, Math.ceil(p2.x-p1.x)-2, Math.ceil(p2.y-p1.y)-2);
+    ctx.restore();
+  }
+  function drawLinks(){
+    if (!links.length) return;
+    ctx.save();
+    ctx.strokeStyle='rgba(180,220,255,0.8)';
+    ctx.lineWidth = Math.max(1, Math.min(4, view.scale*0.06));
+    for (const l of links){
+      const a = parseKey(l.from), b=parseKey(l.to);
+      const pa = worldToScreen(a.x+0.5, a.y+0.5);
+      const pb = worldToScreen(b.x+0.5, b.y+0.5);
+      ctx.beginPath(); ctx.moveTo(pa.x, pa.y); ctx.lineTo(pb.x, pb.y); ctx.stroke();
+    }
+    ctx.restore();
+  }
+  // ====== Taille du canvas ======
+  let resizeScheduled=false;
+  const ro=new ResizeObserver(()=>{ if(resizeScheduled) return; resizeScheduled=true; requestAnimationFrame(()=>{ resizeScheduled=false; resizeCanvasToDisplaySize(); }); });
+  ro.observe(stage);
+  const dprMedia = matchMedia(`(resolution: ${window.devicePixelRatio}dppx)`);
+  dprMedia.addEventListener?.('change', ()=>{ dpr=Math.max(1, window.devicePixelRatio||1); resizeCanvasToDisplaySize(); });
+  function resizeCanvasToDisplaySize(){
+    const cssW=Math.max(1, stage.clientWidth), cssH=Math.max(1, stage.clientHeight);
+    const needW=Math.round(cssW*dpr), needH=Math.round(cssH*dpr);
+    if(canvas.width!==needW || canvas.height!==needH){
+      canvas.width=needW; canvas.height=needH; ctx.setTransform(dpr,0,0,dpr,0,0); requestRender();
+    }
+  }
+  // ====== Vue & navigation ======
+  function fitAll(){
+    const rectW=canvas.clientWidth, rectH=canvas.clientHeight; const pad=20;
+    const scaleX=(rectW-2*pad)/WORLD_SIZE, scaleY=(rectH-2*pad)/WORLD_SIZE;
+    view.scale=Math.max(MIN_SCALE, Math.min(scaleX, scaleY));
+    view.x=MIN_COORD - ((rectW/view.scale) - WORLD_SIZE)/2;
+    view.y=MIN_COORD - ((rectH/view.scale) - WORLD_SIZE)/2;
+    saveSession({ view });
+    requestRender();
+  }
+  function centerOnCell(x,y, desiredScale){
+    const rectW=canvas.clientWidth, rectH=canvas.clientHeight;
+    if (desiredScale) view.scale = Math.max(view.scale, desiredScale);
+    view.x = x + 0.5 - rectW/(2*view.scale);
+    view.y = y + 0.5 - rectH/(2*view.scale);
+    saveSession({ view });
+    requestRender();
+  }
+  function centerOnRect(r){ const cx = (r.x1 + r.x2 + 1)/2, cy = (r.y1 + r.y2 + 1)/2; centerOnCell(cx, cy); }
+  function resetView(){
+    const GRID_ZOOM = 16; view.scale = GRID_ZOOM;
+    if (rectSel) centerOnRect(rectSel);
+    else if (selected) centerOnCell(selected.x, selected.y);
+    else { const rectW=canvas.clientWidth, rectH=canvas.clientHeight; view.x = 0.5 - rectW/(2*view.scale); view.y = 0.5 - rectH/(2*view.scale); }
+    saveSession({ view });
+    requestRender();
+  }
+  fitBtn.addEventListener('click', fitAll);
+  resetViewBtn.addEventListener('click', resetView);
+  spawnBtn.addEventListener('click', ()=>{ setSingleSelection(0,0); centerOnCell(0,0,18); });
+  // ====== Emoji panel ======
+  const EMOJIS = ['🏠','⛺','🤑','💥','⛩','⚓','⛴','🏇','🔷','🌀','⛰','🗻','🏜','🌲','🌳','🌴','🌵','🎁','📍','📌','⛏','🔨','⚔','⛔','⭕','❌','✅','❎','❓','❗','💀','💩','⬆','⬇','⬅','➡'];
+  function openEmojiPanel(){ emojiPanel.style.display='block'; }
+  function closeEmojiPanel(){ emojiPanel.style.display='none'; }
+  let emojiApplyTarget = null;
+
+  function buildEmojiGrid(){
+    emojiGrid.innerHTML='';
+    for (const e of EMOJIS){
+      const b=document.createElement('button'); b.className='btn'; b.textContent=e;
+      b.addEventListener('click', (ev)=>{
+        const target = emojiApplyTarget || selected;
+        if (!target && selectedSet.size===0){ showToast('Sélectionnez une cellule.'); return; }
+        let targetPoint = target;
+        if (!targetPoint){
+          withHistoryBatch((record)=>{ 
+            for (const k of selectedSet){ 
+              const {x,y}=parseKey(k); const ch=setCell(x,y,{ e, es:1 }); if(ch) record(ch); targetPoint={x,y}; 
+            } 
+          });
+        } else {
+          const ch = setCell(targetPoint.x, targetPoint.y, { e, es:1 });
+          if (ch) pushHistory({ type:'batch', changes:[{ kind:'cell', ...ch }] });
+        }
+        save(); requestRender();
+        if (targetPoint) centerOnCell(targetPoint.x, targetPoint.y, ev.ctrlKey ? 24 : 18);
+        closeEmojiPanel(); ctxMenu.style.display='none'; showToast(`Émoji ${e} appliqué`);
+        emojiApplyTarget = null;
+      });
+      emojiGrid.appendChild(b);
+    }
+  }
+  buildEmojiGrid();
+  emojiToggle.addEventListener('click', ()=>{ emojiApplyTarget = null; (emojiPanel.style.display==='block') ? closeEmojiPanel() : openEmojiPanel(); });
+  emojiClose.addEventListener('click', closeEmojiPanel);
+
+  emojiRemoveBtn.addEventListener('click', ()=>{
+    const target = selected;
+    if(!target){ showToast('Sélectionnez une cellule'); return; }
+    const cur=getCell(target.x,target.y);
+    if(cur?.e){
+      const ch = setCell(target.x, target.y, { e:'' });
+      if (ch) pushHistory({ type:'batch', changes:[{ kind:'cell', ...ch }] });
+      save(); requestRender(); showToast('Émoji retiré');
+    }else{
+      showToast('Aucun émoji dans cette cellule');
+    }
+  });
+  emojiClear.addEventListener('click', ()=>{
+    const target = emojiApplyTarget || selected;
+    if (target){ const ch = setCell(target.x, target.y, { e:'' }); if (ch) pushHistory({ type:'batch', changes:[{ kind:'cell', ...ch }] }); }
+    else { withHistoryBatch((record)=>{ for (const k of selectedSet){ const {x,y} = parseKey(k); const ch = setCell(x,y,{ e:'' }); if (ch) record(ch); } }); }
+    save(); requestRender(); closeEmojiPanel(); ctxMenu.style.display='none'; showToast('Émoji retiré'); emojiApplyTarget = null;
+  });
+  // ====== Menu contextuel ======
+  let lastCtxTarget = null;
+  canvas.addEventListener('contextmenu', (e)=>{
+    e.preventDefault();
+    const stageRect = stage.getBoundingClientRect();
+    ctxMenu.style.left = (e.clientX - stageRect.left) + 'px';
+    ctxMenu.style.top  = (e.clientY - stageRect.top) + 'px';
+    ctxMenu.style.display = 'block';
+
+    // Support clic droit sur émoji même très dézoomé
+    const emo = pickEmojiCellNearPointer(e.clientX, e.clientY);
+    if (emo){ lastCtxTarget = {x:emo.x, y:emo.y}; setSingleSelection(emo.x, emo.y); return; }
+
+    const pick = pickCellFromPointer(e.clientX, e.clientY);
+    lastCtxTarget = {x:pick.cx, y:pick.cy}; setSingleSelection(pick.cx, pick.cy);
+  });
+  document.addEventListener('click', (e)=>{ if(!ctxMenu.contains(e.target)) ctxMenu.style.display='none'; });
+  ctxResetBtn.addEventListener('click', ()=>{ if (lastCtxTarget){ const ch = resetCell(lastCtxTarget.x, lastCtxTarget.y); pushHistory({ type:'batch', changes:[{ kind:'cell', ...ch }] }); save(); requestRender(); } ctxMenu.style.display='none'; });
+  ctxEmojiBtn.addEventListener('click', ()=>{ emojiApplyTarget = lastCtxTarget || selected || null; openEmojiPanel(); ctxMenu.style.display='none'; });
+  // ====== Peinture (mode dessin) — identique à v8.3.1 ======
+  const drawToggle = document.getElementById('drawToggle');
+  const drawPanel = document.getElementById('drawPanel');
+  const toolButtons = {
+    brush: document.getElementById('toolBrush'),
+    rect:  document.getElementById('toolRect'),
+    circle:document.getElementById('toolCircle'),
+    erase: document.getElementById('toolErase'),
+  };
+  const brushSizeEl = document.getElementById('brushSize');
+  const brushAlphaEl= document.getElementById('brushAlpha');
+  const brushSizeOut= document.getElementById('brushSizeOut');
+  const brushAlphaOut=document.getElementById('brushAlphaOut');
+  const exportDrawBtn= document.getElementById('exportDrawBtn');
+  const importDrawBtn= document.getElementById('importDrawBtn');
+  const fileDrawInput = document.getElementById('fileDrawInput');
+  const pickColorBtn = document.getElementById('pickColorBtn');
+
+  let currentTool='brush';
+  let brushSize=+brushSizeEl.value, brushAlpha=+brushAlphaEl.value;
+  let paintStrokes = []; // [{...}]
+  let paintPreview = null;
+  let pipetteActive = false;
+
+  function savePaint(){ try{ localStorage.setItem(PAINT_KEY, JSON.stringify(paintStrokes)); }catch{} }
+  function loadPaint(){ try{ const raw = localStorage.getItem(PAINT_KEY); paintStrokes = raw ? JSON.parse(raw) : []; }catch{ paintStrokes=[]; } }
+  function exportPaint(customName){
+    const data = JSON.stringify(paintStrokes, null, 2);
+    const blob = new Blob([data], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const name = customName || (lastPaintFileName || `dessin-${WORLD_SIZE}x${WORLD_SIZE}.json`);
+    const a = document.createElement('a'); a.href = url; a.download = name; a.click();
+    URL.revokeObjectURL(url);
+  }
+  function importPaint(file){
+    const reader = new FileReader();
+    reader.onload = () => {
+      try { const obj = JSON.parse(reader.result); if(!Array.isArray(obj)) throw new Error(); paintStrokes = obj; savePaint(); requestRender(); lastPaintFileName = file.name || lastPaintFileName; saveSession({ lastPaintFileName }); showToast('Dessin importé'); }
+      catch{ alert('Fichier de dessin invalide'); }
+    };
+    reader.readAsText(file);
+  }
+
+  drawToggle.addEventListener('click', ()=>{
+    const willEnable = !drawMode;
+    drawMode = willEnable;
+    drawToggle.classList.toggle('btn-danger', drawMode);
+    drawToggle.textContent = drawMode ? 'Mode dessin (ACTIF)' : 'Mode dessin';
+    drawPanel.style.display = drawMode ? 'block' : 'none';
+    paintPreview = null; pipetteActive=false;
+    saveSession({ drawMode });
+    requestRender();
+  });
+  function setTool(t){
+    currentTool = t; pipetteActive=false;
+    Object.values(toolButtons).forEach(b=>b.classList.remove('active'));
+    toolButtons[t].classList.add('active');
+    paintPreview = null; requestRender();
+    saveSession({ currentTool });
+  }
+  Object.entries(toolButtons).forEach(([t,btn])=> btn.addEventListener('click', ()=> setTool(t)));
+
+  brushSizeEl.addEventListener('input', ()=>{ brushSize = +brushSizeEl.value; brushSizeOut.textContent = brushSize; saveSession({ brushSize }); if (paintPreview) requestRender(); });
+  brushAlphaEl.addEventListener('input', ()=>{ brushAlpha = +brushAlphaEl.value; brushAlphaOut.textContent = brushAlpha.toFixed(2); saveSession({ brushAlpha }); if (paintPreview) requestRender(); });
+
+  exportDrawBtn.addEventListener('click', ()=>{ 
+    exportPaint();
+    if (!lastPaintFileName) { lastPaintFileName = `dessin-${WORLD_SIZE}x${WORLD_SIZE}.json`; saveSession({ lastPaintFileName }); }
+  });
+  importDrawBtn.addEventListener('click', ()=> fileDrawInput.click());
+  fileDrawInput.addEventListener('change', ()=>{ if(fileDrawInput.files && fileDrawInput.files[0]) importPaint(fileDrawInput.files[0]); });
+
+  const clearDrawAll = document.getElementById('clearDrawAll');
+  clearDrawAll.addEventListener('click', ()=>{
+    if(!paintStrokes.length) return;
+    if(confirm('Effacer tout le dessin de cette carte ?')){
+      const removed = paintStrokes.slice();
+      paintStrokes = [];
+      savePaint();
+      pushHistory({ type:'paintRemove', items: removed });
+      requestRender(); showToast('Calque dessin effacé');
+    }
+  });
+
+  // ====== Pipette dessin ======
+  function distToSeg(px,py, x1,y1,x2,y2){
+    const vx=x2-x1, vy=y2-y1;
+    const wx=px-x1, wy=py-y1;
+    const c1=vx*wx+vy*wy;
+    if(c1<=0) return Math.hypot(px-x1, py-y1);
+    const c2=vx*vx+vy*vy;
+    if(c2<=c1) return Math.hypot(px-x2, py-y2);
+    const t=c1/c2;
+    const projx=x1+t*vx, projy=y1+t*vy;
+    return Math.hypot(px-projx, py-projy);
+  }
+  function hitStrokeAtWorld(s, wx, wy){
+    if(s.type==='brush'){
+      if(!s.points || s.points.length<2) return false;
+      const r = s.size*0.5;
+      for(let i=1;i<s.points.length;i++){
+        const p1=s.points[i-1], p2=s.points[i];
+        if(distToSeg(wx,wy,p1.x,p1.y,p2.x,p2.y) <= r) return true;
+      }
+      return false;
+    } else if(s.type==='rect'){
+      const r = s.rect; const x1=Math.min(r.x1,r.x2), y1=Math.min(r.y1,r.y2);
+      const x2=Math.max(r.x1,r.x2), y2=Math.max(r.y1,r.y2);
+      return (wx>=x1 && wx<=x2 && wy>=y1 && wy<=y2);
+    } else if(s.type==='circle'){
+      const c=s.circle; return (Math.hypot(wx-c.cx, wy-c.cy) <= c.r);
+    }
+    return false;
+  }
+  function samplePaint(wx, wy){
+    for(let i=paintStrokes.length-1;i>=0;i--){
+      const s=paintStrokes[i];
+      if(hitStrokeAtWorld(s, wx, wy)) return { color: s.color.toLowerCase(), alpha: +s.alpha };
+    }
+    return null;
+  }
+  pickColorBtn.addEventListener('click', ()=>{
+    drawMode = true;
+    drawToggle.classList.add('btn-danger'); drawToggle.textContent='Mode dessin (ACTIF)';
+    drawPanel.style.display='block';
+    pipetteActive = true;
+    showToast('Pipette: clique sur le dessin pour échantillonner');
+  });
+
+  // ====== Dessin non cumulatif + aperçu ======
+  function strokeIntersectsViewport(s, vis){
+    if(s.type==='brush'){
+      let minX=Infinity,minY=Infinity,maxX=-Infinity,maxY=-Infinity;
+      for(const p of s.points){ if(p.x<minX) minX=p.x; if(p.y<minY) minY=p.y; if(p.x>maxX) maxX=p.x; if(p.y>maxY) maxY=p.y; }
+      const pad = (s.size||brushSize)*1.2;
+      return !(maxX+pad < vis.minX || minX-pad > vis.maxX || maxY+pad < vis.minY || minY-pad > vis.maxY);
+    } else if(s.type==='rect'){
+      const x1=Math.min(s.rect.x1,s.rect.x2), y1=Math.min(s.rect.y1,s.rect.y2);
+      const x2=Math.max(s.rect.x1,s.rect.x2), y2=Math.max(s.rect.y1,s.rect.y2);
+      return !(x2 < vis.minX || x1 > vis.maxX || y2 < vis.minY || y1 > vis.maxY);
+    } else if(s.type==='circle'){
+      const {cx,cy,r} = s.circle;
+      return !(cx+r < vis.minX || cx-r > vis.maxX || cy+r < vis.minY || cy-r > vis.maxY);
+    }
+    return true;
+  }
+  function drawPaint(vis){
+    for(const s of paintStrokes){
+      if(!strokeIntersectsViewport(s, vis)) continue;
+
+      // Effacer la zone (pas de cumul)
+      ctx.save();
+      ctx.globalCompositeOperation = 'destination-out';
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = '#000';
+      ctx.strokeStyle = '#000';
+
+      if(s.type==='brush'){
+        if(!s.points || s.points.length<2){ ctx.restore(); continue; }
+        ctx.lineCap='round'; ctx.lineJoin='round'; ctx.lineWidth = Math.max(1, s.size * view.scale);
+        ctx.beginPath();
+        const p0 = worldToScreen(s.points[0].x, s.points[0].y);
+        ctx.moveTo(p0.x, p0.y);
+        for(let i=1;i<s.points.length;i++){
+          const p = worldToScreen(s.points[i].x, s.points[i].y);
+          ctx.lineTo(p.x, p.y);
+        }
+        ctx.stroke();
+      } else if(s.type==='rect'){
+        const p1 = worldToScreen(Math.min(s.rect.x1,s.rect.x2), Math.min(s.rect.y1,s.rect.y2));
+        const p2 = worldToScreen(Math.max(s.rect.x1,s.rect.x2), Math.max(s.rect.y1,s.rect.y2));
+        ctx.fillRect(p1.x, p1.y, (p2.x-p1.x), (p2.y-p1.y));
+      } else if(s.type==='circle'){
+        const c = worldToScreen(s.circle.cx, s.circle.cy);
+        const r = s.circle.r * view.scale;
+        ctx.beginPath(); ctx.arc(c.x, c.y, r, 0, Math.PI*2); ctx.fill();
+      }
+      ctx.restore();
+
+      // Peindre
+      ctx.save();
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.globalAlpha = s.alpha;
+      ctx.fillStyle = s.color; ctx.strokeStyle = s.color;
+
+      if(s.type==='brush'){
+        ctx.lineCap='round'; ctx.lineJoin='round'; ctx.lineWidth = Math.max(1, s.size * view.scale);
+        ctx.beginPath();
+        const p0 = worldToScreen(s.points[0].x, s.points[0].y);
+        ctx.moveTo(p0.x, p0.y);
+        for(let i=1;i<s.points.length;i++){
+          const p = worldToScreen(s.points[i].x, s.points[i].y);
+          ctx.lineTo(p.x, p.y);
+        }
+        ctx.stroke();
+      } else if(s.type==='rect'){
+        const p1 = worldToScreen(Math.min(s.rect.x1,s.rect.x2), Math.min(s.rect.y1,s.rect.y2));
+        const p2 = worldToScreen(Math.max(s.rect.x1,s.rect.x2), Math.max(s.rect.y1,s.rect.y2));
+        ctx.fillRect(p1.x, p1.y, (p2.x-p1.x), (p2.y-p1.y));
+      } else if(s.type==='circle'){
+        const c = worldToScreen(s.circle.cx, s.circle.cy);
+        const r = s.circle.r * view.scale;
+        ctx.beginPath(); ctx.arc(c.x, c.y, r, 0, Math.PI*2); ctx.fill();
+      }
+      ctx.restore();
+    }
+
+    // Aperçu
+    if(paintPreview){
+      const prevColor = paintPreview.color || currentColor;
+      const prevAlpha = ('alpha' in paintPreview) ? paintPreview.alpha : brushAlpha;
+
+      if(paintPreview.type!=='erase'){
+        ctx.save();
+        ctx.globalAlpha = Math.min(0.5, prevAlpha);
+        ctx.fillStyle = prevColor; ctx.strokeStyle = prevColor;
+
+        if(paintPreview.type==='brush' && paintPreview.points?.length>1){
+          ctx.lineCap='round'; ctx.lineJoin='round'; ctx.lineWidth = Math.max(1, (paintPreview.size??brushSize) * view.scale);
+          ctx.beginPath();
+          const p0 = worldToScreen(paintPreview.points[0].x, paintPreview.points[0].y);
+          ctx.moveTo(p0.x, p0.y);
+          for(let i=1;i<paintPreview.points.length;i++){
+            const p = worldToScreen(paintPreview.points[i].x, paintPreview.points[i].y);
+            ctx.lineTo(p.x, p.y);
+          }
+          ctx.stroke();
+        } else if(paintPreview.type==='rect'){
+          const p1 = worldToScreen(Math.min(paintPreview.rect.x1,paintPreview.rect.x2), Math.min(paintPreview.rect.y1,paintPreview.rect.y2));
+          const p2 = worldToScreen(Math.max(paintPreview.rect.x1,paintPreview.rect.x2), Math.max(paintPreview.rect.y1,paintPreview.rect.y2));
+          ctx.fillRect(p1.x, p1.y, (p2.x-p1.x), (p2.y-p1.y));
+        } else if(paintPreview.type==='circle'){
+          const c = worldToScreen(paintPreview.circle.cx, paintPreview.circle.cy);
+          const r = paintPreview.circle.r * view.scale;
+          ctx.beginPath(); ctx.arc(c.x, c.y, r, 0, Math.PI*2); ctx.fill();
+        }
+        ctx.restore();
+      }
+
+      // Bordure d'aperçu
+      if(paintPreview.type==='rect' || paintPreview.type==='erase'){
+        const p1 = worldToScreen(Math.min(paintPreview.rect.x1,paintPreview.rect.x2), Math.min(paintPreview.rect.y1,paintPreview.rect.y2));
+        const p2 = worldToScreen(Math.max(paintPreview.rect.x1,paintPreview.rect.x2), Math.max(paintPreview.rect.y1,paintPreview.rect.y2));
+        ctx.save();
+        ctx.strokeStyle = 'rgba(159,212,255,0.9)'; ctx.setLineDash([8,4]); ctx.lineWidth=2;
+        ctx.strokeRect(p1.x, p1.y, (p2.x-p1.x), (p2.y-p1.y));
+        ctx.restore();
+      } else if(paintPreview.type==='circle'){
+        const c = worldToScreen(paintPreview.circle.cx, paintPreview.circle.cy);
+        const r = paintPreview.circle.r * view.scale;
+        ctx.save();
+        ctx.strokeStyle = 'rgba(159,212,255,0.9)'; ctx.setLineDash([8,4]); ctx.lineWidth=2;
+        ctx.beginPath(); ctx.arc(c.x, c.y, r, 0, Math.PI*2); ctx.stroke();
+        ctx.restore();
+      }
+    }
+  }
+
+  function addStroke(s){
+    s.id = 's' + Date.now().toString(36) + Math.random().toString(36).slice(2,7);
+    if(s.type==='rect' && s.rect){
+      const x1=Math.min(s.rect.x1,s.rect.x2), y1=Math.min(s.rect.y1,s.rect.y2);
+      const x2=Math.max(s.rect.x1,s.rect.x2), y2=Math.max(s.rect.y1,s.rect.y2);
+      s.rect = {x1,y1,x2,y2};
+    }
+    paintStrokes.push(s);
+    savePaint();
+    pushHistory({ type:'paintAdd', items:[s] });
+  }
+  // ====== Zone (cellules) — inchangé ======
+  function setZoneUI(){
+    if(zoneMode){ zoneBtn.classList.add('btn-danger'); zoneBtn.textContent = 'Zone (ACTIF) — désactiver'; zoneWarning.style.display=''; zoneActions.style.display=''; }
+    else { zoneBtn.classList.remove('btn-danger'); zoneBtn.textContent = 'Zone'; zoneWarning.style.display='none'; zoneActions.style.display='none'; zoneInfo.textContent=''; }
+    saveSession({ zoneMode });
+  }
+  zoneBtn.addEventListener('click', ()=>{ zoneMode = !zoneMode; rectSel = null; if(zoneMode){ selected = null; selectedSet.clear(); updateEditorsFromCell(null,null); } setZoneUI(); requestRender(); });
+  function areaCount(r){ return (r? (r.x2-r.x1+1)*(r.y2-r.y1+1) : 0); }
+
+  function applyZone(action){
+    if(!rectSel) return; const {x1,y1,x2,y2}=rectSel; const area=(x2-x1+1)*(y2-y1+1);
+    let cancel=false;
+    zoneProgress.style.display=''; zoneProgress.innerHTML=`⚠️ Zone de <b>${area.toLocaleString()}</b> cellules. Cela peut être long.<br><button id="cancelRun" class="btn" style="margin-top:6px">Annuler</button>`;
+    document.getElementById('cancelRun').onclick=()=>{ cancel=true; };
+    const chunk=20000; let done=0; const textNow = noteInput.value.trim(); const colorNow = currentColor; const batch = [];
+    function step(xStart,y){
+      for(let yv=y; yv<=y2; yv++){
+        for(let xv=(yv===y? xStart: x1); xv<=x2; xv++){
+          if(cancel){ zoneProgress.textContent='Opération annulée.'; zoneActions.style.display='none'; if(batch.length) pushHistory({type:'batch',changes:batch}); save(); requestRender(); return; }
+          let ch;
+          if(action==='apply'){ const cur = getCell(xv,yv); if (!cur?.e) ch = setCell(xv,yv,{ color: colorNow, t: textNow }); }
+          else ch = resetCell(xv,yv);
+          if(ch) batch.push({ kind:'cell', ...ch });
+          done++; if(done%chunk===0){ zoneProgress.textContent = `Progression: ${done.toLocaleString()} / ${area.toLocaleString()}…`; requestRender(); setTimeout(()=> step(xv+1,yv),0); return; }
+        }
+      }
+      if (batch.length) pushHistory({ type:'batch', changes: batch });
+      save(); requestRender(); zoneProgress.style.display='none'; zoneActions.style.display='none';
+      showToast((action==='apply'?'Zone appliquée':'Zone réinitialisée')+` (${area.toLocaleString()} cells)`);
+    }
+    step(x1,y1);
+  }
+  zoneApplyBtn.addEventListener('click', ()=> applyZone('apply'));
+  zoneResetBtn.addEventListener('click', ()=> applyZone('reset'));
+  zoneCancelBtn.addEventListener('click', ()=>{ rectSel=null; zoneActions.style.display='none'; zoneInfo.textContent=''; zoneMode=false; setZoneUI(); requestRender(); });
+
+  document.addEventListener('keydown', (e)=>{
+    if (zoneMode && rectSel && (e.key === 'Delete' || e.key === 'Backspace')) {
+      e.preventDefault();
+      applyZone('reset');
+    }
+  });
+  // ====== Aide / Undo-Redo / Raccourcis ======
+  const noteInputEl = noteInput;
+  let drawMode=false; // déjà utilisé au-dessus
+  let spacePan=false;
+  let spacePanPrimed=false;
+
+  helpToggle.addEventListener('click', ()=>{ helpBox.style.display = (helpBox.style.display==='none' || !helpBox.style.display) ? 'block' : 'none'; });
+  document.addEventListener('click', (e)=>{ if (!helpBox.contains(e.target) && e.target!==helpToggle && helpBox.style.display==='block') { helpBox.style.display = 'none'; } });
+
+  document.addEventListener('keydown', (e)=>{
+    if (drawMode && e.code === 'Space') {
+      e.preventDefault();
+      if (document.activeElement && document.activeElement.tagName === 'BUTTON') document.activeElement.blur();
+      spacePan = true;
+      spacePanPrimed = true;
+    }
+    if(e.altKey && e.key==='Enter'){ e.preventDefault();
+      if(!document.fullscreenElement){ (app.requestFullscreen||app.webkitRequestFullscreen||app.msRequestFullscreen)?.call(app); }
+      else { (document.exitFullscreen||document.webkitExitFullscreen||document.msExitFullscreen)?.call(document); }
+      return;
+    }
+    if (document.activeElement === noteInputEl) return;
+    const keyName = e.key.toLowerCase(); const ctrlOrMeta = e.ctrlKey || e.metaKey;
+    if (ctrlOrMeta && !e.shiftKey && keyName === 'z'){ e.preventDefault(); undo(); }
+    else if (ctrlOrMeta && (keyName === 'y' || (e.shiftKey && keyName === 'z'))){ e.preventDefault(); redo(); }
+    else if (ctrlOrMeta && keyName === 's'){ e.preventDefault(); saveBoth(); }
+  });
+  document.addEventListener('keyup', (e)=>{ if (e.code==='Space') { e.preventDefault(); spacePan=false; } });
+
+  // Auto-save texte (zoom sur édition la 1ère fois)
+  let textTimer=null, zoomedOnEdit=false;
+  noteInputEl.addEventListener('keydown', (e)=>{ e.stopPropagation(); });
+  noteInputEl.addEventListener('input', () => {
+    clearTimeout(textTimer);
+    if (!zoomedOnEdit && selected){ zoomedOnEdit = true; centerOnCell(selected.x, selected.y, 18); }
+    textTimer = setTimeout(() => {
+      const textNow = noteInputEl.value.trim();
+      if (zoneMode && rectSel) applyZone('apply');
+      else applyToSelection(c=>({ ...c, color: currentColor, t: textNow }));
+    }, 300);
+  });
+  noteInputEl.addEventListener('blur', ()=>{ zoomedOnEdit = false; });
+
+  resetBtn.addEventListener('click', ()=> {
+    if(!selected){ showToast('Aucune cellule sélectionnée'); return; }
+    withHistoryBatch((record)=>{
+      for (const k of (selectedSet.size?selectedSet:[key(selected.x,selected.y)])) {
+        const {x,y} = parseKey(k); record( resetCell(x,y) );
+      }
+    });
+    save(); updateEditorsFromCell(selected?.x, selected?.y); requestRender(); showToast('Cellule(s) réinitialisée(s)');
+  });
+  // ====== Interaction (pan/zoom/dessin + hover + ctrl-multi corrigé) ======
+  let dragging=false, last={x:0,y:0}, dragStart={x:0,y:0}, dragMoved=false;
+  let zoneStart=null;
+  let drawing=false;
+  let drawStart=null;
+  let spaceAnchor = null;
+
+  document.addEventListener('keydown', (e)=>{ if(e.code==='Space'){ e.preventDefault(); spacePan=true; spacePanPrimed=true; }});
+  document.addEventListener('keyup',   (e)=>{ if(e.code==='Space'){ e.preventDefault(); spacePan=false; spaceAnchor=null; }});
+
+  canvas.addEventListener('pointerdown', (e)=>{
+    hoverTip.style.display='none';
+    canvas.setPointerCapture(e.pointerId);
+
+    // Pipette dessin ?
+    if(pipetteActive){
+      const rect = canvas.getBoundingClientRect();
+      const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+      const w = screenToWorld(mx, my);
+      const samp = samplePaint(w.x, w.y);
+      if(samp){
+        setActiveSwatch(samp.color);
+        brushAlpha = samp.alpha; brushAlphaEl.value = String(brushAlpha); brushAlphaOut.textContent = brushAlpha.toFixed(2);
+        showToast(`Pipette: ${samp.color} • α ${samp.alpha.toFixed(2)}`);
+      }else{
+        showToast('Aucune couleur trouvée sous le pointeur');
+      }
+      pipetteActive=false;
+      requestRender();
+      return;
+    }
+
+    if(drawMode && !spacePan){
+      drawing = true;
+      const rect = canvas.getBoundingClientRect();
+      const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+      const w = screenToWorld(mx, my);
+      drawStart = {x:w.x, y:w.y};
+      const base = { color: currentColor, alpha: brushAlpha, size: brushSize };
+      if(currentTool==='brush'){
+        paintPreview = { type:'brush', ...base, points:[{x:w.x,y:w.y}] };
+      } else if(currentTool==='rect'){
+        paintPreview = { type:'rect',  ...base, rect:{x1:w.x,y1:w.y,x2:w.x,y2:w.y} };
+      } else if(currentTool==='circle'){
+        paintPreview = { type:'circle',...base, circle:{cx:w.x,cy:w.y,r:0} };
+      } else if(currentTool==='erase'){
+        paintPreview = { type:'erase', color:'#000000', alpha:0, rect:{x1:w.x,y1:w.y,x2:w.x,y2:w.y} };
+      }
+      requestRender();
+      return;
+    }
+
+    if(zoneMode){
+      const pick = pickCellFromPointer(e.clientX, e.clientY);
+      zoneStart = {x:pick.cx, y:pick.cy};
+      rectSel = {x1:pick.cx, y1:pick.cy, x2:pick.cx, y2:pick.cy};
+      zoneActions.style.display=''; requestRender(); return;
+    }
+
+    if(e.button===0){
+      dragging = true; dragMoved=false;
+      last.x=e.clientX; last.y=e.clientY;
+      dragStart.x=e.clientX; dragStart.y=e.clientY;
+      canvas.classList.add('dragging');
+    }
+  });
+
+  canvas.addEventListener('pointermove', (e)=>{
+  
+  const rectHUD = canvas.getBoundingClientRect();
+  const mxHUD = e.clientX - rectHUD.left;
+  const myHUD = e.clientY - rectHUD.top;
+  if (mxHUD >= 0 && myHUD >= 0 && mxHUD <= rectHUD.width && myHUD <= rectHUD.height){
+    const wpt = screenToWorld(mxHUD, myHUD);
+    const cxHud = clamp(Math.floor(wpt.x + 1e-5), MIN_COORD, MAX_COORD);
+    const cyHud = clamp(Math.floor(wpt.y + 1e-5), MIN_COORD, MAX_COORD);
+    hudCX.textContent = cxHud;
+    hudCY.textContent = cyHud;
+  }
+  
+    if(!dragging && !drawing && !spacePan) handleHover(e.clientX, e.clientY);
+
+    const rect = canvas.getBoundingClientRect();
+    const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+
+    if(drawMode && drawing && !spacePan){
+      const w = screenToWorld(Math.max(0,Math.min(rect.width,mx)), Math.max(0,Math.min(rect.height,my)));
+      if(currentTool==='brush'){
+        paintPreview.points.push({x:w.x,y:w.y});
+      } else if(currentTool==='rect' || currentTool==='erase'){
+        paintPreview.rect.x2 = w.x; paintPreview.rect.y2 = w.y;
+      } else if(currentTool==='circle'){
+        const dx = w.x - drawStart.x, dy = w.y - drawStart.y;
+        paintPreview.circle.r = Math.hypot(dx,dy);
+      }
+      requestRender();
+      return;
+    }
+
+    if(zoneStart){
+      const w = screenToWorld(Math.max(0,Math.min(rect.width,mx)), Math.max(0,Math.min(rect.height,my)));
+      const cx2 = clamp(Math.floor(w.x + 1e-5), MIN_COORD, MAX_COORD);
+      const cy2 = clamp(Math.floor(w.y + 1e-5), MIN_COORD, MAX_COORD);
+      rectSel = { x1: Math.min(zoneStart.x,cx2), y1: Math.min(zoneStart.y,cy2), x2: Math.max(zoneStart.x,cx2), y2: Math.max(zoneStart.y,cy2) };
+      zoneInfo.textContent = `Zone: ${rectSel.x1},${rectSel.y1} → ${rectSel.x2},${rectSel.y2} (${areaCount(rectSel)} cellules)`;
+      requestRender();
+		} else if((dragging && !drawMode) || (drawMode && spacePan)){
+		  if(drawMode && spacePan){
+          const wa = screenToWorld(mx, my);
+          if(spacePanPrimed || !spaceAnchor){
+          spaceAnchor = { wx: wa.x, wy: wa.y };
+          spacePanPrimed = false;
+        } else {
+          const wb = spaceAnchor;
+          view.x += wb.wx - wa.x;
+          view.y += wb.wy - wa.y;
+          saveSession({ view });
+          requestRender();
+        }
+      } else {
+        if(!dragMoved && (Math.abs(e.clientX - dragStart.x) > 4 || Math.abs(e.clientY - dragStart.y) > 4)) dragMoved = true;
+        const dx=(e.clientX-last.x)/view.scale; const dy=(e.clientY-last.y)/view.scale;
+        view.x -= dx; view.y -= dy; last.x=e.clientX; last.y=e.clientY; saveSession({ view }); requestRender();
+      }
+    }
+  });
+
+  canvas.addEventListener('pointerup', (e)=>{
+    const rect = canvas.getBoundingClientRect();
+    const mx=e.clientX-rect.left, my=e.clientY-rect.top;
+	const wpt = screenToWorld(mx, my);
+	const cxHud = clamp(Math.floor(wpt.x + 1e-5), MIN_COORD, MAX_COORD);
+	const cyHud = clamp(Math.floor(wpt.y + 1e-5), MIN_COORD, MAX_COORD);
+	hudCX.textContent = cxHud;
+	hudCY.textContent = cyHud;
+
+    if(drawMode && drawing && !spacePan){
+      drawing=false;
+      if(currentTool==='brush' && paintPreview?.points?.length>1){
+        addStroke({ ...paintPreview, type:'brush' });
+      } else if((currentTool==='rect' || currentTool==='erase') && paintPreview?.rect){
+        const r = paintPreview.rect; if(Math.abs(r.x2-r.x1)>0 && Math.abs(r.y2-r.y1)>0){
+          const t = (currentTool==='erase') ? { ...paintPreview, color:'#000', alpha:0, type:'rect' } : { ...paintPreview, type:'rect' };
+          addStroke(t);
+        }
+      } else if(currentTool==='circle' && paintPreview?.circle){
+        if(paintPreview.circle.r>0) addStroke({ ...paintPreview, type:'circle' });
+      }
+      paintPreview = null; requestRender(); 
+      try{ canvas.releasePointerCapture(e.pointerId); }catch{}
+      return;
+    }
+
+    if(zoneStart){ zoneStart=null; requestRender(); }
+    else if(dragging){
+      dragging=false; canvas.classList.remove('dragging');
+
+      // 1) Essayer de sélectionner un émoji proche (clic facile même très dézoomé)
+      let target = pickEmojiCellNearPointer(e.clientX, e.clientY);
+      if (!target){
+        // 2) Sinon tomber sur la cellule "logique"
+        const pick = pickCellFromPointer(e.clientX, e.clientY);
+        target = { x: pick.cx, y: pick.cy };
+      }
+
+      if(!dragMoved && target){
+        const v = getCell(target.x, target.y);
+
+        if (e.ctrlKey){
+          // --- Correctif: premier Ctrl+clic = on purge l’ancienne sélection ---
+          if (!ctrlPrimed){
+            selectedSet.clear();
+            selected = null;
+            ctrlPrimed = true; // désormais on est "en mode multi" tant qu'on reste en Ctrl
+          }
+          toggleSelection(target.x, target.y); // ajoute/retire la case cliquée
+        } else {
+          // Clic simple = sélection simple + recentrage éventuel
+          setSingleSelection(target.x, target.y); // remet ctrlPrimed à false
+          if (v && v.e) centerOnCell(target.x, target.y, 18);
+        }
+      }
+      dragMoved=false;
+    }
+    try{ canvas.releasePointerCapture(e.pointerId); }catch{}
+  });
+
+  canvas.addEventListener('mouseleave', ()=>{
+    hoverTip.style.display='none';
+    lastHoverKey=null;
+    hudCX.textContent = '—';
+    hudCY.textContent = '—';
+  });
+
+  // Molette — zoom en gardant l'ancrage
+  canvas.addEventListener('wheel', (e)=>{
+    e.preventDefault();
+    const rect = canvas.getBoundingClientRect();
+    const mx=e.clientX-rect.left, my=e.clientY-rect.top;
+    if(mx<0||my<0||mx>rect.width||my>rect.height) return;
+    const wb=screenToWorld(mx,my);
+    const factor = Math.exp(-e.deltaY * 0.0015);
+    view.scale = clamp(view.scale * factor, MIN_SCALE, 200);
+    const wa=screenToWorld(mx,my);
+    view.x += wb.x - wa.x; view.y += wb.y - wa.y; saveSession({ view }); requestRender();
+  }, { passive:false });
+
+  // Double-clic — zoom fort
+  canvas.addEventListener('dblclick', (e)=>{
+    const rect = canvas.getBoundingClientRect();
+    const mx=e.clientX-rect.left, my=e.clientY-rect.top;
+    const wb=screenToWorld(mx,my);
+    const factor = 2.2;
+    view.scale = clamp(view.scale * factor, MIN_SCALE, 200);
+    const wa=screenToWorld(mx,my);
+    view.x += wb.x - wa.x; view.y += wb.y - wa.y; saveSession({ view }); requestRender();
+  });
+
+  // ====== "Cellule précise" (parser souple) ======
+  cellSelectBtn.addEventListener('click', ()=>{
+    const def = selected ? `${selected.x},${selected.y}` : '0,0';
+    const raw = prompt('Aller à la cellule (x,y) — séparateur "," ou "."', def);
+    if(raw==null) return;
+    const parts = raw.replace(/\s+/g,'').split(/[.,]+/).filter(Boolean);
+    if(parts.length<2){ showToast('Entrée invalide'); return; }
+    const first = parseInt(parts[0],10);
+    const last  = parseInt(parts[parts.length-1],10);
+    if(!Number.isFinite(first) || !Number.isFinite(last)){ showToast('Entrée invalide'); return; }
+    const x = clamp(first, MIN_COORD, MAX_COORD);
+    const y = clamp(last,  MIN_COORD, MAX_COORD);
+    setSingleSelection(x,y);
+    centerOnCell(x,y,18);
+  });
+
+  // ====== Export / Import / Fusion + Sauver ======
+  function exportJSON(customName){
+    const obj = Object.fromEntries(cells); obj.__links = links;
+    const data = JSON.stringify(obj, null, 2);
+    const blob = new Blob([data], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const name = customName || (lastCellsFileName || `carte-${WORLD_SIZE}x${WORLD_SIZE}.json`);
+    const a = document.createElement('a'); a.href = url; a.download = name; a.click();
+    URL.revokeObjectURL(url);
+  }
+  function importJSON(file){
+    if (!confirm("⚠️ Écraser les données de cette carte ? Pense à exporter avant.")) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const obj = JSON.parse(reader.result);
+        links = obj.__links || []; delete obj.__links;
+        cells = new Map(Object.entries(obj));
+        lastCellsFileName = file.name || lastCellsFileName; saveSession({ lastCellsFileName });
+        save(); requestRender(); showToast('Import terminé');
+      } catch(e){ alert('Import invalide'); }
+    };
+    reader.readAsText(file);
+  }
+  function importMergeJSON(file){
+    const reader = new FileReader();
+    reader.onload = () => {
+      let incomingObj;
+      try { incomingObj = JSON.parse(reader.result); } catch(e){ alert('Fichier JSON invalide'); return; }
+      const incoming = new Map(Object.entries(incomingObj));
+      incoming.delete('__links');
+
+      let newOnly=0, identical=0, conflicts=0;
+      for(const [k,v] of incoming){
+        const cur = cells.get(k);
+        if(!cur){ newOnly++; continue; }
+        if(JSON.stringify(cur)===JSON.stringify(v)) identical++; else conflicts++;
+      }
+      const total = incoming.size;
+      const msg = `Import (fusion) — ${total.toLocaleString()} cellules\n`+
+                  `➕ Nouvelles: ${newOnly.toLocaleString()}\n`+
+                  `≡ Identiques: ${identical.toLocaleString()}\n`+
+                  `⚠️ Conflits: ${conflicts.toLocaleString()}\n\n`+
+                  `Choisissez :\n1) Ajouter seulement les nouvelles\n2) Écraser nos cellules en conflit\n3) Fusionner (texte concaténé, couleur rose)`;
+      const choice = prompt(msg, '1');
+      if(choice===null) return;
+
+      function mergeText(a,b,filename){
+        const ta = (a?.t||'').trim(), tb = (b?.t||'').trim();
+        if(!tb) return ta; if(!ta) return tb;
+        if(ta.includes(tb)) return ta; if(tb.includes(ta)) return tb;
+        return ta + "\n\nTexte importé (" + filename + ") : " + tb;
+      }
+
+      let appliedNew=0, appliedConf=0;
+      for(const [k,v] of incoming){
+        const cur = cells.get(k);
+        if(!cur){ cells.set(k, v); appliedNew++; continue; }
+        if(JSON.stringify(cur)===JSON.stringify(v)) continue;
+
+        if(choice==='2'){
+          cells.set(k, v); appliedConf++;
+        } else if(choice==='3'){
+          const MERGE_HIGHLIGHT = '#ff69b4';
+          const mergedText = mergeText(cur, v, file.name || 'import.json');
+          const merged = { color: MERGE_HIGHLIGHT, e: cur.e, es: cur.es, t: mergedText, img: cur.img };
+          cells.set(k, merged); appliedConf++;
+        }
+      }
+      lastCellsFileName = file.name || lastCellsFileName; saveSession({ lastCellsFileName });
+      save(); requestRender();
+      showToast(`Fusion terminée — ajoutées: ${appliedNew}, conflits: ${appliedConf}`);
+    };
+    reader.readAsText(file);
+  }
+  exportBtn.addEventListener('click', ()=>{ exportJSON(); if(!lastCellsFileName){ lastCellsFileName = `carte-${WORLD_SIZE}x${WORLD_SIZE}.json`; saveSession({ lastCellsFileName }); }});
+  importBtn.addEventListener('click', ()=> fileInput.click());
+  fileInput.addEventListener('change', ()=>{ if(fileInput.files && fileInput.files[0]) importJSON(fileInput.files[0]); });
+  importMergeBtn.addEventListener('click', ()=> fileInputMerge.click());
+  fileInputMerge.addEventListener('change', ()=>{ if (fileInputMerge.files && fileInputMerge.files[0]) importMergeJSON(fileInputMerge.files[0]); });
+
+  async function saveBoth(){
+  // Si File System Access dispo : écrasement direct
+  if (window.showSaveFilePicker){
+    try{
+      // Si on n'a pas encore lié les fichiers, on te demande une seule fois
+      await ensureFileHandles();
+
+      // Écriture directe dans les fichiers liés
+      await writeHandle(cellsFileHandle, buildCellsJSONString());
+      await writeHandle(paintFileHandle, buildPaintJSONString());
+      showToast('Sauvegardé directement dans les fichiers liés ✅');
+      return;
+    }catch(err){
+      console.warn('Direct save failed, fallback to download', err);
+      // on retombe en mode téléchargement si l’utilisateur annule, etc.
+    }
+  }
+
+  // Fallback (téléchargement classique)
+  if(!lastCellsFileName && !lastPaintFileName){
+    showToast('Aucun fichier importé auparavant. Utilise «Exporter JSON» et «Exporter Dessin» une première fois.');
+    return;
+  }
+  if(lastCellsFileName) exportJSON(lastCellsFileName);
+  if(lastPaintFileName) exportPaint(lastPaintFileName);
+  showToast('Sauvegardé (téléchargement) — File System Access indisponible');
+}
+
+  saveBtn.addEventListener('click', saveBoth);
+
+  // ====== Liens ======
+  linkBtn.addEventListener('click', ()=>{
+    if (selectedSet.size<2){ showToast('Sélectionnez au moins 2 cellules.'); return; }
+    const arr=[...selectedSet];
+    const added=[];
+    for (let i=0;i<arr.length-1;i++){
+      const a=arr[i], b=arr[i+1];
+      if (!links.find(l=>(l.from===a && l.to===b)||(l.from===b && l.to===a))){
+        const it={from:a,to:b}; links.push(it); added.push(it);
+      }
+    }
+    if (added.length) pushHistory({ type:'linksAdd', items: added });
+    save(); requestRender();
+  });
+  unlinkBtn.addEventListener('click', ()=>{
+    if (!links.length) return;
+    if (selectedSet.size<2){
+      const removed = links.slice(); links = []; if (removed.length) pushHistory({ type:'linksRemove', items: removed });
+    } else {
+      const arr=[...selectedSet];
+      const removed=[];
+      links = links.filter(l=>{
+        for (let i=0;i<arr.length-1;i++){
+          const a=arr[i], b=arr[i+1];
+          if ((l.from===a&&l.to===b)||(l.from===b&&l.to===a)){ removed.push(l); return false; }
+        }
+        return true;
+      });
+      if (removed.length) pushHistory({ type:'linksRemove', items: removed });
+    }
+    save(); requestRender();
+  });
+
+  // ====== Captures ======
+  function updateThumb(dataUrl){
+    imgThumbWrap.innerHTML = '';
+    if(!dataUrl) return;
+    const img = new Image(); img.src = dataUrl; imgThumbWrap.appendChild(img);
+  }
+  function compressImage(file, maxW=1280, maxH=1280, quality=0.85){
+    return new Promise((resolve,reject)=>{
+      const img = new Image();
+      img.onload = ()=>{
+        let {width:w, height:h} = img;
+        const ratio = Math.min(1, maxW/w, maxH/h);
+        const cw = Math.round(w*ratio), ch = Math.round(h*ratio);
+        const c = document.createElement('canvas'); c.width=cw; c.height=ch;
+        const c2 = c.getContext('2d');
+        c2.drawImage(img,0,0,cw,ch);
+        resolve(c.toDataURL('image/jpeg', quality));
+      };
+      img.onerror = reject;
+      const r = new FileReader();
+      r.onload = ()=>{ img.src = r.result; };
+      r.readAsDataURL(file);
+    });
+  }
+  imgAddBtn.addEventListener('click', ()=> imgInput.click());
+  imgInput.addEventListener('change', async ()=>{
+    if(!selected){ showToast('Sélectionnez une cellule'); return; }
+    const f = imgInput.files?.[0]; if(!f) return;
+    const dataUrl = await compressImage(f);
+    const ch = setCell(selected.x, selected.y, { img:dataUrl });
+    if (ch) pushHistory({ type:'batch', changes:[{ kind:'cell', ...ch }] });
+    save(); updateThumb(dataUrl); requestRender(); showToast('Capture ajoutée');
+    imgInput.value='';
+  });
+  imgClearBtn.addEventListener('click', ()=>{
+    if(!selected){ showToast('Sélectionnez une cellule'); return; }
+    const ch = setCell(selected.x, selected.y, { img:'' });
+    if (ch) pushHistory({ type:'batch', changes:[{ kind:'cell', ...ch }] });
+    save(); updateThumb(''); requestRender(); showToast('Capture retirée');
+  });
+  imgZoomBtn.addEventListener('click', ()=>{
+    if(!selected){ showToast('Sélectionnez une cellule'); return; }
+    const v = getCell(selected.x, selected.y);
+    if(!v?.img){ showToast('Aucune image dans cette cellule'); return; }
+    imgModalImg.src = v.img; imgModal.style.display = 'flex';
+  });
+  imgModalClose.addEventListener('click', ()=>{ imgModal.style.display = 'none'; imgModalImg.src=''; });
+  imgModal.addEventListener('click', (e)=>{ if(e.target===imgModal) { imgModal.style.display='none'; imgModalImg.src=''; } });
+
+  // ====== Appliquer à la sélection ======
+  function applyToSelection(mapper){
+    if (selectedSet.size===0 && selected) selectedSet.add(key(selected.x,selected.y));
+    withHistoryBatch((record)=>{
+      for (const k of selectedSet){
+        const {x,y} = parseKey(k);
+        const cur = getCell(x,y) || { color: currentColor, t:'', e:'', es:1 };
+        const next = mapper(cur);
+        const ch = setCell(x,y,next);
+        if (ch) record(ch);
+      }
+    });
+    save(); requestRender();
+  }
+
+  // ====== Changement de taille de carte ======
+  sizeSelect.addEventListener('change', ()=>{
+    const warn = "⚠️ Changer la dimension ouvre une carte séparée.\nPense à exporter la carte et le dessin.";
+    if(!confirm(warn)){ sizeSelect.value = String(CELLS_PER_AXIS); return; }
+    CELLS_PER_AXIS = parseInt(sizeSelect.value,10);
+    saveSession({ lastSize: CELLS_PER_AXIS });
+    recomputeBounds();
+    STORAGE_KEY = storageKeyCells(CELLS_PER_AXIS);
+    PAINT_KEY   = storageKeyPaint(CELLS_PER_AXIS);
+    load(); loadPaint();
+    fitAll(); setZoneUI();
+    setSingleSelection(0,0);
+    requestRender();
+    showToast(`Dimensions : ${WORLD_SIZE.toLocaleString()} × ${WORLD_SIZE.toLocaleString()}`);
+  });
+
+  // ====== Init ======
+  function resizeAndRender(){ resizeCanvasToDisplaySize(); requestRender(); }
+  window.addEventListener('resize', resizeAndRender);
+
+  function init(){
+    if(sess.currentTool && toolButtons[sess.currentTool]) setTool(sess.currentTool);
+    if(typeof sess.brushSize === 'number'){ brushSize = sess.brushSize; brushSizeEl.value = String(brushSize); brushSizeOut.textContent = brushSize; }
+    if(typeof sess.brushAlpha === 'number'){ brushAlpha = sess.brushAlpha; brushAlphaEl.value = String(brushAlpha); brushAlphaOut.textContent = brushAlpha.toFixed(2); }
+    if(typeof sess.drawMode === 'boolean' && sess.drawMode){ drawMode=true; drawToggle.classList.add('btn-danger'); drawToggle.textContent='Mode dessin (ACTIF)'; drawPanel.style.display='block'; }
+    load(); loadPaint();
+    resizeCanvasToDisplaySize();
+    if(sess.view && typeof sess.view.scale==='number'){
+      view.x = +sess.view.x || 0; view.y = +sess.view.y || 0; view.scale = +sess.view.scale || view.scale;
+      requestRender();
+    } else {
+      fitAll();
+    }
+    helpBox.style.display='none';
+    if(sess.lastSel && typeof sess.lastSel.x==='number' && typeof sess.lastSel.y==='number'){
+      setSingleSelection(sess.lastSel.x, sess.lastSel.y);
+    } else {
+      setSingleSelection(0,0);
+    }
+    setZoneUI();
+    requestRender();
+  }
+  init();
+})();
+</script>
+</body>
+</html>
+
